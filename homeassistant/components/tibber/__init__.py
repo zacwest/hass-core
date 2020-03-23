@@ -6,7 +6,7 @@ import aiohttp
 import tibber
 import voluptuous as vol
 
-from homeassistant.const import CONF_ACCESS_TOKEN, CONF_NAME, EVENT_HOMEASSISTANT_STOP
+from homeassistant.const import CONF_ACCESS_TOKEN, CONF_HOST, EVENT_HOMEASSISTANT_STOP
 from homeassistant.helpers import discovery
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 import homeassistant.helpers.config_validation as cv
@@ -18,7 +18,14 @@ DOMAIN = "tibber"
 FIRST_RETRY_TIME = 60
 
 CONFIG_SCHEMA = vol.Schema(
-    {DOMAIN: vol.Schema({vol.Required(CONF_ACCESS_TOKEN): cv.string})},
+    {
+        DOMAIN: vol.Schema(
+            {
+                vol.Required(CONF_ACCESS_TOKEN): cv.string,
+                vol.Optional(CONF_HOST): cv.string,
+            }
+        )
+    },
     extra=vol.ALLOW_EXTRA,
 )
 
@@ -61,6 +68,6 @@ async def async_setup(hass, config, retry_delay=FIRST_RETRY_TIME):
         return False
 
     for component in ["sensor", "notify"]:
-        discovery.load_platform(hass, component, DOMAIN, {CONF_NAME: DOMAIN}, config)
+        discovery.load_platform(hass, component, DOMAIN, conf, config)
 
     return True

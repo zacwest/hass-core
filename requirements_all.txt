@@ -1119,6 +1119,9 @@ pyCEC==0.4.13
 # homeassistant.components.tplink
 pyHS100==0.3.5
 
+# homeassistant.components.tibber
+pyHanSolo==0.1.0
+
 # homeassistant.components.met
 # homeassistant.components.norway_air
 pyMetno==0.4.6
