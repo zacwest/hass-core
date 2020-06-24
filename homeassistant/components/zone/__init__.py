@@ -119,7 +119,14 @@ def async_active_zone(
         if zone_dist is None:
             continue
 
-        within_zone = zone_dist - radius < zone.attributes[ATTR_RADIUS]
+        if zone_dist < radius:
+            # accuracy is worse than distance from the zone center
+            # so this largely tests whether the point is within the zone at all
+            within_zone = zone_dist < zone.attributes[ATTR_RADIUS]
+        else:
+            # distance from zone center exceeds accuracy, normal situation
+            within_zone = zone_dist - radius < zone.attributes[ATTR_RADIUS]
+
         closer_zone = closest is None or zone_dist < min_dist  # type: ignore
         smaller_zone = (
             zone_dist == min_dist

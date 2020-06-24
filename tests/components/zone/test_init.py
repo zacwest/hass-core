@@ -502,3 +502,56 @@ async def test_unavailable_zone(hass):
     assert zone.async_active_zone(hass, 0.0, 0.01) is None
 
     assert zone.in_zone(hass.states.get("zone.bla"), 0, 0) is False
+
+
+async def test_accuracy_is_poor_exceeds_radius_and_is_outside_zone(hass):
+    """Test active zone accuracy/radius being larger in magnitude than the distance from a zone while outside it."""
+
+    latitude = 37.12345678
+    longitude = -122.12345678
+
+    assert await setup.async_setup_component(
+        hass,
+        zone.DOMAIN,
+        {
+            "zone": [
+                {
+                    "name": "Home",
+                    "latitude": latitude,
+                    "longitude": longitude,
+                    "radius": 100,
+                },
+            ]
+        },
+    )
+
+    distance_1800m_in_latitude = 0.0162199
+    active = zone.async_active_zone(
+        hass, latitude - distance_1800m_in_latitude, longitude, 2000
+    )
+    assert active is None
+
+
+async def test_accuracy_is_poor_exceeds_radius_and_is_inside_zone(hass):
+    """Test active zone accuracy/radius being larger in magnitude than the distance from a zone while inside it."""
+
+    latitude = 37.12345678
+    longitude = -122.12345678
+
+    assert await setup.async_setup_component(
+        hass,
+        zone.DOMAIN,
+        {
+            "zone": [
+                {
+                    "name": "Home",
+                    "latitude": latitude,
+                    "longitude": longitude,
+                    "radius": 100,
+                },
+            ]
+        },
+    )
+
+    active = zone.async_active_zone(hass, latitude, longitude, 2000)
+    assert "zone.home" == active.entity_id
