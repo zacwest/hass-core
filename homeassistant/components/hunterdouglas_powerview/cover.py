@@ -1,10 +1,12 @@
 """Support for hunter douglas shades."""
 import asyncio
 import logging
+import enum
 
-from aiopvapi.helpers.constants import ATTR_POSITION1, ATTR_POSITION_DATA
+from aiopvapi.helpers.constants import ATTR_POSITION1, ATTR_POSITION2, ATTR_POSITION_DATA
 from aiopvapi.resources.shade import (
     ATTR_POSKIND1,
+    ATTR_POSKIND2,
     MAX_POSITION,
     MIN_POSITION,
     factory as PvShade,
@@ -77,11 +79,24 @@ async def async_setup_entry(hass, entry, async_add_entities):
                 name_before_refresh,
             )
             continue
-        entities.append(
-            PowerViewShade(
-                shade, name_before_refresh, room_data, coordinator, device_info
+
+        allowed_positions = shade.allowed_positions.get(ATTR_POSITION)
+
+        position_kinds = []
+        if allowed_positions.get(ATTR_POSKIND1):
+            position_kinds.append(PositionKind.Kind1)
+        elif allowed_positions.get(ATTR_POSKIND2):
+            position_kinds.append(PositionKind.Kind2)
+        elif position_kinds.count == 0:
+            _LOGGER.warning("shade with unknown position kind, assuming position kind 1")
+            position_kinds.append(PositionKind.Kind1)
+
+        for position_kind in position_kinds:
+            entities.append(
+                PowerViewShade(
+                    shade, name_before_refresh, room_data, coordinator, device_info, position_kind
+                )
             )
-        )
     async_add_entities(entities)
 
 
@@ -94,13 +109,25 @@ def hass_position_to_hd(hass_positon):
     """Convert hass position to hunter douglas position."""
     return int(hass_positon / 100 * MAX_POSITION)
 
+class PositionKind(enum.Enum):
+    """Represents a position's kind."""
+
+    Kind1 = 1
+    Kind2 = 2
+
 
 class PowerViewShade(ShadeEntity, CoverEntity):
     """Representation of a powerview shade."""
 
-    def __init__(self, shade, name, room_data, coordinator, device_info):
+    def __init__(self, shade, name_without_pos, room_data, coordinator, device_info, pos_kind):
         """Initialize the shade."""
         room_id = shade.raw_data.get(ROOM_ID_IN_SHADE)
+
+        if pos_kind == PositionKind.Kind2:
+            name = name_without_pos + " position 2"
+        else:
+            name = name_without_pos
+
         super().__init__(coordinator, device_info, shade, name)
         self._shade = shade
         self._device_info = device_info
@@ -110,6 +137,7 @@ class PowerViewShade(ShadeEntity, CoverEntity):
         self._scheduled_transition_update = None
         self._room_name = room_data.get(room_id, {}).get(ROOM_NAME_UNICODE, "")
         self._current_cover_position = MIN_POSITION
+        self._pos_kind = pos_kind
 
     @property
     def device_state_attributes(self):
@@ -154,6 +182,19 @@ class PowerViewShade(ShadeEntity, CoverEntity):
         """Return the name of the shade."""
         return self._shade_name
 
+    def move_dictionary(self, target_position_hd):
+        """Move dictionary for setting position's value."""
+        if self._pos_kind == PositionKind.Kind1:
+            return {
+                ATTR_POSITION1: target_position_hd,
+                ATTR_POSKIND1: self._shade.allowed_positions.get(ATTR_POSKIND1)
+            }
+        elif self._pos_kind == PositionKind.Kind2:
+            return {
+                ATTR_POSITION2: target_position_hd,
+                ATTR_POSKIND2: self._shade.allowed_positions.get(ATTR_POSKIND1)
+            }
+
     async def async_close_cover(self, **kwargs):
         """Close the cover."""
         await self._async_move(0)
@@ -184,10 +225,7 @@ class PowerViewShade(ShadeEntity, CoverEntity):
         self._async_schedule_update_for_transition(steps_to_move)
         self._async_update_from_command(
             await self._shade.move(
-                {
-                    ATTR_POSITION1: hass_position_to_hd(target_hass_position),
-                    ATTR_POSKIND1: 1,
-                }
+                self.move_dictionary(hass_position_to_hd(target_hass_position))
             )
         )
         self._is_opening = False
