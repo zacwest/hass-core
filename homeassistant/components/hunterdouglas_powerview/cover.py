@@ -2,9 +2,10 @@
 import asyncio
 import logging
 
-from aiopvapi.helpers.constants import ATTR_POSITION1, ATTR_POSITION_DATA
+from aiopvapi.helpers.constants import ATTR_POSITION1, ATTR_POSITION2, ATTR_POSITION_DATA
 from aiopvapi.resources.shade import (
     ATTR_POSKIND1,
+    ATTR_POSKIND2,
     MAX_POSITION,
     MIN_POSITION,
     factory as PvShade,
@@ -13,11 +14,16 @@ import async_timeout
 
 from homeassistant.components.cover import (
     ATTR_POSITION,
+    ATTR_TILT_POSITION,
     DEVICE_CLASS_SHADE,
     SUPPORT_CLOSE,
     SUPPORT_OPEN,
     SUPPORT_SET_POSITION,
     SUPPORT_STOP,
+    SUPPORT_OPEN_TILT,
+    SUPPORT_CLOSE_TILT,
+    SUPPORT_STOP_TILT,
+    SUPPORT_SET_TILT_POSITION,
     CoverEntity,
 )
 from homeassistant.core import callback
@@ -110,6 +116,7 @@ class PowerViewShade(ShadeEntity, CoverEntity):
         self._scheduled_transition_update = None
         self._room_name = room_data.get(room_id, {}).get(ROOM_NAME_UNICODE, "")
         self._current_cover_position = MIN_POSITION
+        self._current_tilt_position = MIN_POSITION
 
     @property
     def device_state_attributes(self):
@@ -122,6 +129,8 @@ class PowerViewShade(ShadeEntity, CoverEntity):
         supported_features = SUPPORT_OPEN | SUPPORT_CLOSE | SUPPORT_SET_POSITION
         if self._device_info[DEVICE_MODEL] != LEGACY_DEVICE_MODEL:
             supported_features |= SUPPORT_STOP
+        if self._shade.can_tilt:
+            supported_features |= SUPPORT_OPEN_TILT | SUPPORT_CLOSE_TILT | SUPPORT_SET_TILT_POSITION
         return supported_features
 
     @property
@@ -145,6 +154,11 @@ class PowerViewShade(ShadeEntity, CoverEntity):
         return hd_position_to_hass(self._current_cover_position)
 
     @property
+    def current_cover_tilt_position(self):
+        """Return the current position of tilt."""
+        return hd_position_to_hass(self._current_tilt_position)
+
+    @property
     def device_class(self):
         """Return device class."""
         return DEVICE_CLASS_SHADE
@@ -156,11 +170,11 @@ class PowerViewShade(ShadeEntity, CoverEntity):
 
     async def async_close_cover(self, **kwargs):
         """Close the cover."""
-        await self._async_move(0)
+        await self._async_move(0, None)
 
     async def async_open_cover(self, **kwargs):
         """Open the cover."""
-        await self._async_move(100)
+        await self._async_move(100, None)
 
     async def async_stop_cover(self, **kwargs):
         """Stop the cover."""
@@ -169,32 +183,59 @@ class PowerViewShade(ShadeEntity, CoverEntity):
         self._async_update_from_command(await self._shade.stop())
         await self._async_force_refresh_state()
 
+    async def async_open_cover_tilt(self, **kwargs):
+        await self._async_move(None, 100)
+
+    async def async_close_cover_tilt(self, **kwargs):
+        await self._async_move(None, 0)
+
+    async def async_stop_cover_tilt(self, **kwargs):
+        await self.async_stop_cover()
+
     async def async_set_cover_position(self, **kwargs):
         """Move the shade to a specific position."""
         if ATTR_POSITION not in kwargs:
             return
-        await self._async_move(kwargs[ATTR_POSITION])
+        await self._async_move(kwargs[ATTR_POSITION], None)
 
-    async def _async_move(self, target_hass_position):
-        """Move the shade to a position."""
-        current_hass_position = hd_position_to_hass(self._current_cover_position)
-        steps_to_move = abs(current_hass_position - target_hass_position)
-        if not steps_to_move:
+    async def async_set_cover_tilt_position(self, **kwargs):
+        if ATTR_TILT_POSITION not in kwargs:
             return
-        self._async_schedule_update_for_transition(steps_to_move)
+        await self._async_move(None, kwargs[ATTR_TILT_POSITION])
+
+    async def _async_move(self, target_hass_cover_position, target_hass_tilt_position):
+        """Move the shade and/or tilt to a position."""
+
+        if target_hass_cover_position is None:
+            target_hass_cover_position = hd_position_to_hass(self._current_cover_position)
+        if target_hass_tilt_position is None and self.supported_features & SUPPORT_SET_TILT_POSITION:
+            target_hass_tilt_position = hd_position_to_hass(self._current_tilt_position)
+
+        current_hass_cover_position = hd_position_to_hass(self._current_cover_position)
+        current_hass_tilt_position = hd_position_to_hass(self._current_tilt_position)
+
+        cover_steps_to_move = abs(current_hass_cover_position - target_hass_cover_position)
+        tilt_steps_to_move = abs(current_hass_tilt_position - target_hass_tilt_position)
+
+        if not cover_steps_to_move and not tilt_steps_to_move:
+            return
+
+        self._async_schedule_update_for_transition(max(cover_steps_to_move, tilt_steps_to_move))
         self._async_update_from_command(
             await self._shade.move(
                 {
-                    ATTR_POSITION1: hass_position_to_hd(target_hass_position),
                     ATTR_POSKIND1: 1,
+                    ATTR_POSITION1: hass_position_to_hd(target_hass_cover_position),
+                    ATTR_POSKIND2: 2,
+                    ATTR_POSITION2: hass_position_to_hd(target_hass_tilt_position),
                 }
             )
         )
         self._is_opening = False
         self._is_closing = False
-        if target_hass_position > current_hass_position:
+        if target_hass_cover_position > current_hass_cover_position:
             self._is_opening = True
-        elif target_hass_position < current_hass_position:
+        elif target_hass_cover_position < current_hass_cover_position:
             self._is_closing = True
         self.async_write_ha_state()
 
@@ -218,6 +259,8 @@ class PowerViewShade(ShadeEntity, CoverEntity):
         position_data = self._shade.raw_data.get(ATTR_POSITION_DATA, {})
         if ATTR_POSITION1 in position_data:
             self._current_cover_position = int(position_data[ATTR_POSITION1])
+        if ATTR_POSITION2 in position_data:
+            self._current_tilt_position = int(position_data[ATTR_POSITION2])
         self._is_opening = False
         self._is_closing = False
 
