@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from homeassistant.components import script
 from homeassistant.components.blueprint.models import Blueprint, DomainBlueprints
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import HomeAssistant, callback, Context
 from homeassistant.setup import async_setup_component
 from homeassistant.util import yaml
 
@@ -70,18 +70,21 @@ async def test_confirmable_notification(hass: HomeAssistant) -> None:
         )
 
     turn_on_calls = async_mock_service(hass, "homeassistant", "turn_on")
+    context = Context()
 
     with patch(
         "homeassistant.components.mobile_app.device_action.async_call_action_from_config"
     ) as mock_call_action:
 
         # Trigger script
-        await hass.services.async_call(script.DOMAIN, "confirm")
+        await hass.services.async_call(script.DOMAIN, "confirm", context=context)
 
         # Give script the time to attach the trigger.
         await asyncio.sleep(0.1)
 
-    hass.bus.async_fire("mobile_app_notification_action", {"action": "CONFIRM"})
+    hass.bus.async_fire("mobile_app_notification_action", {"action": "ANYTHING_ELSE"})
+    hass.bus.async_fire("mobile_app_notification_action", {"action": "CONFIRM_" + Context().id})
+    hass.bus.async_fire("mobile_app_notification_action", {"action": "CONFIRM_" + context.id})
     await hass.async_block_till_done()
 
     assert len(mock_call_action.mock_calls) == 1
@@ -99,8 +102,8 @@ async def test_confirmable_notification(hass: HomeAssistant) -> None:
         "device_id": "frodo",
         "data": {
             "actions": [
-                {"action": "CONFIRM", "title": "Confirm"},
-                {"action": "DISMISS", "title": "Dismiss"},
+                {"action": "CONFIRM_" + _context.id, "title": "Confirm"},
+                {"action": "DISMISS_" + _context.id, "title": "Dismiss"},
             ]
         },
     }
