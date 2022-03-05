@@ -98,6 +98,7 @@ class PlexServer:
             plexapi.X_PLEX_IDENTIFIER = server_config[CONF_CLIENT_ID]
         plexapi.myplex.BASE_HEADERS = plexapi.reset_base_headers()
         plexapi.server.BASE_HEADERS = plexapi.reset_base_headers()
+        plexapi.server.BASE_HEADERS["X-Plex-Features"] = "external-media"
 
     @property
     def account(self):
